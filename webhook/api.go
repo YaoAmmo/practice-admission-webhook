@@ -126,17 +126,19 @@ func validateService(w http.ResponseWriter, r *http.Request)  {
 	admissionResponse.Allowed = true
 
 	// 校验lb类型的service的annotation是否带有service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id字段，以及值是否为空
-	if value, ok := service.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id"]; !ok {
-		admissionResponse.Allowed = false
-		admissionResponse.Result = &metav1.Status{
-			Message: "Fail create LoadBalancer type service",
-			Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
-		}
-	} else if value == " " {
-		admissionResponse.Allowed = false
-		admissionResponse.Result = &metav1.Status{
-			Message: "Fail create LoadBalancer type service",
-			Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
+	if service.Spec.Type == "LoadBalancer" {
+		if value, ok := service.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id"]; !ok {
+			admissionResponse.Allowed = false
+			admissionResponse.Result = &metav1.Status{
+				Message: "Fail create LoadBalancer type service",
+				Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
+			}
+		} else if value == " " {
+			admissionResponse.Allowed = false
+			admissionResponse.Result = &metav1.Status{
+				Message: "Fail create LoadBalancer type service",
+				Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
+			}
 		}
 	}
 
