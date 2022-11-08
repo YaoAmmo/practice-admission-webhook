@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
 	"net/http"
 	"os"
@@ -16,7 +17,6 @@ import (
 
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 
@@ -95,51 +95,47 @@ func validateService(w http.ResponseWriter, r *http.Request)  {
 		return
 	}
 
-	// 在服务器端验证service资源
-	// 这个在ValidatingWebhookConfiguration当中也会指定这个部分
-	// 在开始之前进行验证
-	serviceResources := &metav1.GroupVersionResource{
-		Group:    "",
-		Version:  "v1",
-		Resource: "services",
-	}
-	if admissionReviewRequest.Request.RequestResource != serviceResources {
-		msg := fmt.Sprintf("did not receive service, got %s", admissionReviewRequest.Request.Resource.Resource)
-		logger.Printf(msg)
-		w.WriteHeader(400)
-		w.Write([]byte(msg))
-		return
-	}
-
 	// 从admissionReview 解码service信息
 	rawRequest := admissionReviewRequest.Request.Object.Raw
 	service := &corev1.Service{}
 	if _, _, err := deserializer.Decode(rawRequest, nil, service); err != nil {
-		msg := fmt.Sprintf("error decoding raw pod: %v", err)
+		msg := fmt.Sprintf("error decoding raw service: %v", err)
 		logger.Printf(msg)
 		w.WriteHeader(500)
 		w.Write([]byte(msg))
 		return
 	}
 
+
 	admissionResponse := &admissionv1.AdmissionResponse{}
 	admissionResponse.Allowed = true
 
-	// 校验lb类型的service的annotation是否带有service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id字段，以及值是否为空
-	if service.Spec.Type == "LoadBalancer" {
-		if value, ok := service.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id"]; !ok {
+
+
+	// 判断创建loadbalancer类型的service的slb id是否为空
+	if service.Spec.Type == "LoadBalancer" && service.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id"] == "" {
+		logMsg := fmt.Sprintf("%s not specified loadbalancer id", service.Name)
+		logger.Printf(logMsg)
+		admissionResponse.Allowed = false
+		admissionResponse.Result = &metav1.Status{
+			Reason: "Create a service of loadbalancer type, you need to specify the loadbalancer id",
+		}
+	}
+
+
+	// 判断创建loadbalancer类型的service是否带有service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id
+	switch service.Spec.Type {
+	case "LoadBalancer":
+		if _, ok := service.Annotations["service.beta.kubernetes.io/alibaba-cloud-loadbalancer-id"]; !ok {
+			logMsg := fmt.Sprintf("%s not specified loadbalancer id", service.Name)
+			logger.Printf(logMsg)
 			admissionResponse.Allowed = false
 			admissionResponse.Result = &metav1.Status{
-				Message: "Fail create LoadBalancer type service",
-				Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
-			}
-		} else if value == " " {
-			admissionResponse.Allowed = false
-			admissionResponse.Result = &metav1.Status{
-				Message: "Fail create LoadBalancer type service",
-				Reason:  "Create a service of loadbalancer type, you need to specify the loadbalancer id",
+				Reason: "Create a service of loadbalancer type, you need to specify the loadbalancer id",
 			}
 		}
+	default:
+		return
 	}
 
 	var admissionReviewResponse admissionv1.AdmissionReview
